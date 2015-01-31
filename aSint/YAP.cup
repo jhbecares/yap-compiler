@@ -1,0 +1,423 @@
+package plg.aSint;
+
+import java_cup.runtime.*;
+import plg.aLex.AnalizadorLexicoYAP;
+import plg.aLex.UnidadLexica;
+import plg.errores.GestionErroresYAP;
+import plg.nodo.*;
+import plg.nodo.operadores.*;
+import plg.reservadas.*;
+import plg.nodo.terminal.*;
+import plg.nodo.sentencias.*;
+import plg.nodo.control.*;
+import plg.nodo.definiciones.*;
+import java.util.*;
+
+scan with {: return getScanner().next_token(); :};
+parser code {: 
+   private GestionErroresYAP errores;
+   public void syntax_error(Symbol unidadLexica) {
+     errores.errorSintactico((UnidadLexica)unidadLexica);
+   }
+   
+:};
+
+init with {: 
+   errores = new GestionErroresYAP();
+   AnalizadorLexicoYAP yap = (AnalizadorLexicoYAP)getScanner();
+   yap.fijaGestionErrores(errores);
+:};
+
+
+
+terminal		END;
+terminal		PUNTO, PUNTO_COMA, COMA, DOS_PUNTOS, IGUAL;	
+terminal		PAR_ABRE, PAR_CIERRE, CORCH_ABRE, CORCH_CIERRE;
+terminal		IGUAL_IGUAL, DISTINTO;
+terminal		AND, OR, MAYOR, MAYOR_IGUAL, MENOR, MENOR_IGUAL, NOT;
+terminal		MAS, MENOS, MULT, DIV, MOD, POT;
+terminal		INT, VOID, CHAR, BOOL;
+terminal		IF, THEN, ELSE, ENDIF;
+terminal		WHILE, DO, ENDWHILE;
+terminal		DEFSTRUCT, ENDDEFSTRUCT, DEFPROC, ENDDEFPROC, STRUCT,
+				IS, ENDSTRUCT, PROCEDURE;
+terminal String	IDENTIFICADOR, NUMERO;
+terminal		BEGIN;
+terminal		CALL, RETURN;
+terminal  		TRUE, FALSE;
+
+non terminal Programa			 principal;
+non terminal Programa			 inicio; 
+non terminal Programa  			 definicion_principio, definicion_struct_proc;
+non terminal ListaSentencias 	 bloque; 
+non terminal Sentencia			 sentencia, sentencia_punto_coma; 
+non terminal ListaSentencias 	 lista_sentencias;
+non terminal Expresion	  		 expresion, expresion_multiplicativa, expresion_postfija,
+		 						 expresion_o_logica, expresion_y_logica,
+								 expresion_relacional, expresion_aditiva,
+								 expresion_igualdad;
+non terminal String			     expresion_unaria;
+non terminal Asignacion 		 expresion_asignacion;
+non terminal Terminal   		 expresion_primaria;		 				 
+non terminal Sentencia			 expresion_compuesta, expresion_condicional, 
+    	     			   	     expresion_bucle, expresion_return;
+non terminal Call    			 expresion_call;
+non terminal Vector<Procedure>     	 definicion_proc;
+non terminal Vector<Struct> 	  	 definicion_struct;
+non terminal Vector<Declaracion>  	 lista_declaracion;
+non terminal Vector<Expresion>	  	 lista_parametros_llamada;
+non terminal Vector<Declaracion>  	 lista_parametros;
+non terminal Tipo 		   	         tipo_especial, tipo;
+non terminal PairAux          		 declaracion;
+non terminal Vector<Expresion>     	 apertura_arrays;
+		
+principal  ::=
+	   inicio:ini
+	   {: RESULT = ini; 
+	   	  ArbolRef.arbol=ini;
+	   :}
+	;
+
+inicio  ::= 
+	|  bloque:blo
+	      {: Programa p = new Programa();
+	         p.addCodigo(blo);
+	         RESULT = p; 
+	      :}
+	|  definicion_principio:def  bloque:blo
+	      {: def.addCodigo(blo);
+	         RESULT = def;
+	      :}
+    ;
+
+definicion_principio  ::=
+	   definicion_struct_proc:dsp
+	      {: RESULT = dsp; :}
+        |  DEFPROC definicion_proc:vp ENDDEFPROC
+	      {: DefinicionProcedure dp = new DefinicionProcedure();
+	         for(int i=0; i<vp.size(); i++)
+		    dp.addProcedure(vp.elementAt(i));
+		 Programa p = new Programa();
+		 p.addProcedure(dp);
+		 RESULT = p;
+	      :}	
+        ;
+
+definicion_struct_proc  ::=
+	   DEFSTRUCT  definicion_struct:ds  ENDDEFSTRUCT  DEFPROC  definicion_proc:vp  ENDDEFPROC
+	      {: Programa p = new Programa();
+
+	      	 DefinicionStruct defst = new DefinicionStruct();
+	         for (int i = 0; i < ds.size(); i++)
+	             defst.addStruct(ds.elementAt(i));
+	  	 
+		 DefinicionProcedure dp = new DefinicionProcedure();
+	         for(int i=0; i<vp.size(); i++)
+		    dp.addProcedure(vp.elementAt(i));
+		
+
+		p.addStruct(defst);
+		p.addProcedure(dp);
+	        RESULT = p; 
+	     :}
+
+        |  DEFSTRUCT  definicion_struct:ds  ENDDEFSTRUCT
+	     {: DefinicionStruct defst = new DefinicionStruct();
+	        for (int i = 0; i < ds.size(); i++)
+	            defst.addStruct(ds.elementAt(i));
+		Programa p = new Programa();
+		p.addStruct(defst);
+	        RESULT = p; 
+	     :}
+        ;
+
+definicion_struct  ::=
+	   STRUCT  IDENTIFICADOR:id  IS  lista_declaracion:ld  ENDSTRUCT
+	      {: Struct str = new Struct (id);
+	         for (int i = 0; i < ld.size(); i++)
+	      	     str.addDeclaracion(ld.elementAt(i));
+	         Vector<Struct> miv = new Vector<Struct>();
+	         miv.add(str);
+	         RESULT = miv; 
+	      :}
+        |  STRUCT  IDENTIFICADOR:id  IS  lista_declaracion:ldec  ENDSTRUCT  definicion_struct:defst
+ 	      {: 
+	         Struct str = new Struct(id);
+	         for (int i = 0; i < ldec.size(); i++)
+	      	     str.addDeclaracion(ldec.elementAt(i));
+	         defst.insertElementAt(str,0);
+	         RESULT = defst;
+	      :}
+        ;
+
+
+definicion_proc  ::=
+	   PROCEDURE  IDENTIFICADOR:id  PAR_ABRE  lista_parametros:in  DOS_PUNTOS  tipo_especial:out  PAR_CIERRE  bloque:c
+	      {:  Vector<Procedure> vp = new Vector<Procedure>();
+	          vp.add(new Procedure(id, in, out, c));
+		  RESULT = vp;
+	      :}
+        |  PROCEDURE  IDENTIFICADOR:id  PAR_ABRE  lista_parametros:in  DOS_PUNTOS  tipo_especial:out  PAR_CIERRE  bloque:c  definicion_proc:vp
+	      {:  vp.insertElementAt(new Procedure(id, in, out, c),0);
+	          RESULT = vp;
+	      :}
+        ;
+
+lista_declaracion  ::=
+	   tipo:t1  declaracion:dec1  PUNTO_COMA
+	   {: Vector<Declaracion> miv = new Vector<Declaracion>();
+	      miv.add(new Declaracion(t1, dec1));
+	      RESULT = miv;
+	   :}
+        |  tipo:t2  declaracion:dec2  PUNTO_COMA  lista_declaracion:miv
+	   {: Declaracion d = new Declaracion(t2, dec2);
+	      miv.insertElementAt(d,0);
+	      RESULT = miv;
+	   :}
+    	;
+		
+lista_parametros  ::=
+		
+	   	  tipo:t1  declaracion:dec1
+	   {: Declaracion d = new Declaracion(t1, dec1);
+	      Vector<Declaracion> miv = new Vector<Declaracion>();
+	      miv.add(d);
+	      RESULT = miv;
+	   :}
+        |  tipo:t2  declaracion:dec2  COMA  lista_parametros:miv
+	   {: Declaracion d = new Declaracion(t2, dec2);
+	      miv.insertElementAt(d,0);
+	      RESULT = miv;
+	   :}
+	   	| {: :}
+        ;
+
+tipo  ::=
+		   INT
+		   {: RESULT = new Tipo(T_Tipo.INT); :}
+		|  CHAR
+		   {: RESULT = new Tipo(T_Tipo.CHAR); :}
+		|  BOOL
+		   {: RESULT = new Tipo(T_Tipo.BOOL); :}
+		|  IDENTIFICADOR:id
+		   {: RESULT = new Tipo(T_Tipo.IDENTIFICADOR, id); :}
+		;
+            
+tipo_especial  ::=
+      	   tipo:t
+	     {: RESULT = t; :}
+        |  VOID
+	     {: RESULT = new Tipo(T_Tipo.VOID); :}
+		|  tipo:t apertura_arrays:a
+	     {: t.setDimensions(a);
+	        RESULT = t;  :}
+        ;
+
+declaracion  ::=
+	     IDENTIFICADOR:id
+	       {: RESULT = new PairAux(id,null); :}
+        |IDENTIFICADOR:id  apertura_arrays:a
+	       {: RESULT = new PairAux(id,a); :}
+        ;
+
+bloque  ::=
+	   BEGIN END
+        |  BEGIN  lista_sentencias:ls  END
+	   {: RESULT = ls; :}
+	;  
+		
+lista_sentencias  ::=
+	   sentencia_punto_coma:s
+	     {: RESULT = new ListaSentencias(s); :}
+	|  lista_sentencias:ls sentencia_punto_coma:s
+	     {: ls.addSentencia(s);
+	        RESULT = ls;  :}
+	;
+
+sentencia_punto_coma  ::=
+	   PUNTO_COMA
+	|  sentencia:sent PUNTO_COMA
+	   {: RESULT = sent; :}
+	|  expresion_condicional:exp
+	   {: RESULT = exp; :}
+	|  expresion_bucle: expb
+	   {: RESULT = expb; :}
+   	|  expresion_compuesta:n3
+	   {: RESULT = n3; :}
+	;
+
+sentencia  ::=
+	   expresion:n1
+	   {: RESULT = n1; :}
+	|  expresion_asignacion:n2
+	   {: RESULT = n2; :}	 
+	|  tipo:t declaracion:n4
+	   {: RESULT = new Declaracion(t, n4); :}
+	|  expresion_return:n5
+	   {: RESULT = n5; :}
+	;
+
+expresion_return  ::=
+         RETURN expresion:ex
+	       {: RESULT = new Return(ex); :}
+	   | RETURN
+	       {: RESULT = new Return(); :}
+        ;
+
+expresion_call  ::=
+           CALL IDENTIFICADOR:id PAR_ABRE PAR_CIERRE
+  	     {: RESULT = new Call(id); :}
+        |  CALL IDENTIFICADOR:id PAR_ABRE lista_parametros_llamada:miv PAR_CIERRE
+	     {: Call cl = new Call(id);
+	        for (int i = 0; i < miv.size(); i++)
+	        	  cl.addParametro(miv.elementAt(i));
+	        RESULT = cl;
+	     :}
+        ;
+
+lista_parametros_llamada  ::=
+	   expresion:n
+	     {: Vector<Expresion> miv = new Vector<Expresion>();
+	        miv.add(n);
+	        RESULT = miv;
+	     :}
+	|  lista_parametros_llamada:miv COMA expresion:exp
+	     {: miv.add(exp);
+	        RESULT = miv;
+	     :}
+	;
+
+expresion_compuesta  ::=
+	   BEGIN  END
+	|  BEGIN lista_sentencias:ls  END
+	     {: RESULT = ls; :}
+	;		     
+
+expresion  ::=
+	   expresion_o_logica:n
+	     {: RESULT = n; :}    
+	|  NOT expresion:exp
+	     {: RESULT = new NodoOpUnario(T_OpsUnarias.NOT,exp); :}
+	;
+
+expresion_asignacion  ::=
+	  expresion_primaria:ep  IGUAL  expresion:exp
+	     {: RESULT = new Asignacion(ep, exp);  :}
+	;
+
+expresion_o_logica  ::=
+	   expresion_y_logica:n
+	     {: RESULT = n; :}
+	|  expresion_o_logica:eyl OR expresion_y_logica:ei
+	     {: RESULT = new NodoOpBinario(eyl,T_Operaciones.OR,ei); :}	   
+	;
+
+expresion_y_logica  ::=
+	   expresion_igualdad:n
+	     {: RESULT = n; :}	   
+	|  expresion_y_logica:eyl AND expresion_igualdad:ei
+	     {: RESULT = new NodoOpBinario(eyl,T_Operaciones.AND,ei); :}
+	; 
+
+expresion_igualdad  ::=
+	   expresion_relacional:n
+	     {: RESULT = n; :}
+	|  expresion_igualdad:e1 IGUAL_IGUAL expresion_relacional:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.IGUAL,e2); :}
+	|  expresion_igualdad:e1 DISTINTO expresion_relacional:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.DISTINTO,e2); :}
+	;
+
+expresion_relacional  ::=
+	   expresion_aditiva:n
+	     {: RESULT = n; :}
+	|  expresion_relacional:e1 MENOR expresion_aditiva:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.MENOR,e2); :}
+	|  expresion_relacional:e1 MENOR_IGUAL expresion_aditiva:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.MENOR_IGUAL,e2); :}
+	|  expresion_relacional:e1 MAYOR expresion_aditiva:e2	
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.MAYOR,e2); :}
+	|  expresion_relacional:e1 MAYOR_IGUAL expresion_aditiva:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.MAYOR_IGUAL,e2); :}
+	; 	
+        
+expresion_aditiva  ::=
+	   expresion_multiplicativa:n
+	     {: RESULT = n; :}
+	|  expresion_aditiva:e1 MAS expresion_multiplicativa:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.MAS,e2); :}
+	|  expresion_aditiva:e1 MENOS expresion_multiplicativa:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.MENOS,e2); :}
+	;
+
+expresion_multiplicativa  ::=
+	   expresion_postfija:n
+	     {: RESULT = n; :}
+	|  expresion_multiplicativa:e1 MULT expresion_postfija:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.MULT,e2); :}
+	|  expresion_multiplicativa:e1 DIV expresion_postfija:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.DIV,e2); :}
+	|  expresion_multiplicativa:e1 MOD expresion_postfija:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.MOD,e2); :}
+	|  expresion_multiplicativa:e1 POT expresion_postfija:e2
+	     {: RESULT = new NodoOpBinario(e1,T_Operaciones.POT,e2); :}
+	;
+
+expresion_postfija  ::=
+	   expresion_primaria:exppr
+	     {: RESULT = exppr; :}
+    |  NUMERO:n
+         {: RESULT = new Terminal(T_Terminal.NUMERO, n); :}
+    |  expresion_unaria:n NUMERO:nn
+	     {: RESULT = new Terminal(T_Terminal.NUMERO,nn, n); :}
+	|  PAR_ABRE expresion:exp PAR_CIERRE
+	     {: RESULT = exp; :}
+	|  TRUE
+	     {: RESULT = new Terminal(T_Terminal.TRUE); :}
+	|  FALSE
+	     {: RESULT = new Terminal(T_Terminal.FALSE); :}
+	|  expresion_call:n6
+	     {: RESULT = n6; :}
+	;
+
+expresion_unaria  ::=
+           MAS
+             {: RESULT = "+"; :}
+	|  MENOS
+	     {: RESULT = "-"; :}
+	;
+
+expresion_primaria  ::=
+	   IDENTIFICADOR:id1
+	     {: RESULT = new Terminal(T_Terminal.IDENTIFICADOR, id1); :}
+	|  IDENTIFICADOR:id2 apertura_arrays:ap
+	     {: RESULT = new Terminal(T_Terminal.IDENTIFICADOR, id2, ap); :}
+	|  IDENTIFICADOR:id3 PUNTO IDENTIFICADOR:id4
+	     {: RESULT = new Terminal(T_Terminal.STRUCT, id3, id4);  :}
+	|  IDENTIFICADOR:id1 PUNTO IDENTIFICADOR:id2  apertura_arrays:ap
+		 {: RESULT = new Terminal(T_Terminal.STRUCT, id1, id2, ap); :}
+	;
+
+apertura_arrays  ::=
+	   CORCH_ABRE expresion_aditiva:e CORCH_CIERRE
+	     {: Vector<Expresion> ve = new Vector<Expresion>();
+	        ve.add(e); 
+		RESULT = ve;
+             :}
+	|  apertura_arrays:ve CORCH_ABRE expresion_aditiva:e CORCH_CIERRE
+         {: ve.add(e);
+	        RESULT = ve;  
+	     :}
+	;
+
+expresion_condicional  ::=
+	   IF  expresion:e1 THEN lista_sentencias:ls ENDIF 
+	      {: RESULT = new Condicional(e1,ls); :}
+	|  IF  expresion:e1 THEN lista_sentencias:ls ELSE lista_sentencias:lss ENDIF
+	      {: RESULT = new Condicional(e1,ls,lss); :}
+	;
+
+expresion_bucle  ::=
+	   WHILE  expresion:e  DO lista_sentencias:ls ENDWHILE
+	      {: RESULT = new While(e,ls); :}
+	;
